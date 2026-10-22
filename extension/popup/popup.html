@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tab Volume</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1 id="site">Tab Volume</h1>
+      <p id="status" role="status" hidden></p>
+      <button id="reload" type="button" hidden>Reload tab</button>
+
+      <section id="controls" aria-label="Volume for this tab">
+        <div class="level">
+          <input id="level-slider" type="range" min="0" max="100" step="1" value="100" aria-label="Volume" />
+          <input id="level-number" type="number" min="0" max="100" step="1" value="100" aria-label="Volume in percent" />
+          <span class="unit">%</span>
+        </div>
+        <label class="remember">
+          <input id="remember" type="checkbox" />
+          <span id="remember-label">Remember for this site</span>
+        </label>
+      </section>
+
+      <section class="saved">
+        <h2>Saved sites</h2>
+        <ul id="saved"></ul>
+        <p id="saved-empty" class="muted">No saved sites yet.</p>
+      </section>
+
+      <details class="import">
+        <summary>Import</summary>
+        <textarea id="import-text" rows="4" spellcheck="false" placeholder='{"facebook.com": 6}'></textarea>
+        <button id="import-btn" type="button">Import</button>
+        <p id="import-result" class="muted" role="status"></p>
+      </details>
+    </main>
+    <script src="../lib/domain.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

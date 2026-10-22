@@ -55,9 +55,14 @@ export async function launch() {
       await sw.evaluate((d) => chrome.storage.local.set({ domains: d }), domains);
     },
 
+    // Tabs whose URL the extension can't see (chrome://) are matched as the newest URL-less tab.
     async tabIdFor(page) {
       const url = page.url();
-      return sw.evaluate((u) => chrome.tabs.query({}).then((ts) => (ts.find((t) => t.url === u) || {}).id), url);
+      return sw.evaluate((u) => chrome.tabs.query({}).then((ts) => {
+        const match = ts.find((t) => t.url === u);
+        if (match) return match.id;
+        return Math.max(...ts.filter((t) => !t.url).map((t) => t.id));
+      }), url);
     },
 
     async openWithNativeLog(url) {
