@@ -88,6 +88,39 @@ test("shadow DOM element", () => withPage({ preLevel: 6 }, async (h) => {
   assert.ok(near(await h.page.evaluate(() => window.__shadowNative), 0.06));
 }));
 
+test("parser-created declarative shadow DOM autoplay", () => withPage({ path: "/media.html?dsd", preLevel: 6 }, async (h) => {
+  await h.page.waitForFunction(() => window.__dsdNative !== undefined);
+  assert.ok(near(await h.page.evaluate(() => window.__dsdNative), 0.06));
+}));
+
+test("setHTMLUnsafe declarative shadow DOM autoplay", () => withPage({ preLevel: 6 }, async (h) => {
+  await h.page.evaluate(() => {
+    const div = document.createElement("div");
+    document.body.append(div);
+    div.setHTMLUnsafe('<span><template shadowrootmode="open"><audio src="/tone.wav" autoplay></audio></template></span>');
+    const a = div.firstElementChild.shadowRoot.querySelector("audio");
+    a.addEventListener("playing", () => { window.__shadowNative = window.__native(a); });
+  });
+  await h.page.waitForFunction(() => window.__shadowNative !== undefined);
+  assert.ok(near(await h.page.evaluate(() => window.__shadowNative), 0.06));
+}));
+
+for (const [name, make] of [
+  ["new Audio() with autoplay and src set later", "const a = new Audio(); a.autoplay = true; a.src = '/tone.wav'; return a;"],
+  ["new Audio(url) with autoplay", "const a = new Audio('/tone.wav'); a.autoplay = true; return a;"],
+  ["createElement audio with setAttribute src", "const a = document.createElement('audio'); a.setAttribute('autoplay', ''); a.setAttribute('src', '/tone.wav'); return a;"],
+]) {
+  test(`detached autoplay: ${name}`, () => withPage({ startMuted: true, preLevel: 6 }, async (h) => {
+    await h.page.evaluate((code) => {
+      const a = new Function(code)();
+      window.__keep = a;
+      a.addEventListener("playing", () => { window.__detachedNative = window.__native(a); });
+    }, make);
+    await h.page.waitForFunction(() => window.__detachedNative !== undefined);
+    assert.ok(near(await h.page.evaluate(() => window.__detachedNative), 0.06));
+  }));
+}
+
 test("start-muted mutes until level", () => withPage({ startMuted: true }, async (h) => {
   await h.page.evaluate(async () => {
     const a = document.createElement("audio"); a.id = "a"; a.src = "/tone.wav"; document.body.append(a);
@@ -210,6 +243,19 @@ test("MediaElementSource scaled exactly once", () => withPage({ preLevel: 25 }, 
   });
   assert.ok(Math.abs(res.elementRatio * res.gain - 0.25) < 0.03, JSON.stringify(res));
   assert.equal(res.native, 1);
+}));
+
+test("MediaElementAudioSourceNode constructor scaled exactly once", () => withPage({ preLevel: 25 }, async (h) => {
+  const res = await h.page.evaluate(() => {
+    const el = new Audio("/tone.wav");
+    el.volume = 1;
+    const before = window.__native(el);
+    const ctx = new AudioContext();
+    const node = new MediaElementAudioSourceNode(ctx, { mediaElement: el });
+    node.connect(ctx.destination);
+    return { before, native: window.__native(el), isNode: node instanceof MediaElementAudioSourceNode, isAudio: el instanceof Audio };
+  });
+  assert.deepEqual(res, { before: 0.25, native: 1, isNode: true, isAudio: true });
 }));
 
 test("volume 0 does not bypass autoplay policy", async (t) => {

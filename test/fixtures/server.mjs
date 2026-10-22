@@ -29,7 +29,11 @@ const TONE = toneWav();
 function mediaPage(params) {
   const autoplay = params.has("autoplay") ? '<audio id="auto" src="/tone.wav" autoplay></audio>' : "";
   const iframe = params.get("iframe") ? `<iframe id="frame" src="${params.get("iframe")}" allow="autoplay"></iframe>` : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><title>media</title></head><body>${autoplay}${iframe}</body></html>`;
+  const dsd = params.has("dsd")
+    ? `<div id="host"><template shadowrootmode="open"><audio id="dsd" src="/tone.wav" autoplay></audio></template></div>
+<script>{ const a = document.getElementById("host").shadowRoot.querySelector("audio"); a.addEventListener("playing", () => { window.__dsdNative = window.__native(a); }); }</script>`
+    : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>media</title></head><body>${autoplay}${iframe}${dsd}</body></html>`;
 }
 
 export function startServer() {

@@ -14,6 +14,9 @@
   const nativeConnect = nodeProto.connect;
   const nativeDisconnect = nodeProto.disconnect;
   const nativeCreateMES = AudioContext.prototype.createMediaElementSource;
+  const nativeLoad = mediaProto.load;
+  const nativeCreateElement = Document.prototype.createElement;
+  const nativeCreateElementNS = Document.prototype.createElementNS;
   const GainNodeCtor = GainNode;
   const MEDIA_EVENTS = ["play", "playing", "loadstart"];
 
@@ -28,6 +31,7 @@
   const routedToWebAudio = new WeakSet();
   const destinationGains = new WeakMap();
   const knownGains = new Set();
+  const watchedRoots = new WeakSet();
 
   const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
@@ -57,9 +61,14 @@
     }
   }
 
+  // Declarative shadow roots never go through attachShadow, so every added subtree is searched for them.
   function trackTree(node) {
     if (node instanceof HTMLMediaElement) track(node);
-    if (node.querySelectorAll) for (const el of node.querySelectorAll("audio, video")) track(el);
+    if (node.shadowRoot) watch(node.shadowRoot);
+    if (!node.querySelectorAll) return;
+    for (const el of node.querySelectorAll("audio, video")) track(el);
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_ELEMENT);
+    for (let el = walker.nextNode(); el; el = walker.nextNode()) if (el.shadowRoot) watch(el.shadowRoot);
   }
 
   function reconcile(el) {
@@ -88,6 +97,8 @@
   });
 
   function watch(root) {
+    if (watchedRoots.has(root)) return;
+    watchedRoots.add(root);
     observer.observe(root, { childList: true, subtree: true });
     for (const type of MEDIA_EVENTS) root.addEventListener(type, onMediaEvent, true);
     root.addEventListener("volumechange", onVolumeChange, true);
@@ -116,21 +127,69 @@
     return nativePlay.apply(this, arguments);
   };
 
+  mediaProto.load = function load() {
+    track(this);
+    return nativeLoad.apply(this, arguments);
+  };
+
+  for (const prop of ["src", "srcObject", "autoplay"]) {
+    const desc = Object.getOwnPropertyDescriptor(mediaProto, prop);
+    Object.defineProperty(mediaProto, prop, {
+      ...desc,
+      set(value) {
+        track(this);
+        desc.set.call(this, value);
+      },
+    });
+  }
+
+  // Media created in script can autoplay without ever being inserted or played explicitly.
+  Document.prototype.createElement = function createElement() {
+    const el = nativeCreateElement.apply(this, arguments);
+    if (el instanceof HTMLMediaElement) track(el);
+    return el;
+  };
+
+  Document.prototype.createElementNS = function createElementNS() {
+    const el = nativeCreateElementNS.apply(this, arguments);
+    if (el instanceof HTMLMediaElement) track(el);
+    return el;
+  };
+
+  window.Audio = new Proxy(window.Audio, {
+    construct(target, args, newTarget) {
+      const el = Reflect.construct(target, args, newTarget);
+      track(el);
+      return el;
+    },
+  });
+
   Element.prototype.attachShadow = function attachShadow() {
     const root = nativeAttachShadow.apply(this, arguments);
     watch(root);
     return root;
   };
 
+  function markRoutedToWebAudio(el) {
+    if (!(el instanceof HTMLMediaElement)) return;
+    track(el);
+    routedToWebAudio.add(el);
+    apply(el);
+  }
+
   AudioContext.prototype.createMediaElementSource = function createMediaElementSource(el) {
     const node = nativeCreateMES.apply(this, arguments);
-    if (el instanceof HTMLMediaElement) {
-      track(el);
-      routedToWebAudio.add(el);
-      apply(el);
-    }
+    markRoutedToWebAudio(el);
     return node;
   };
+
+  window.MediaElementAudioSourceNode = new Proxy(window.MediaElementAudioSourceNode, {
+    construct(target, args, newTarget) {
+      const node = Reflect.construct(target, args, newTarget);
+      markRoutedToWebAudio(args[1] && args[1].mediaElement);
+      return node;
+    },
+  });
 
   function gainFor(destination) {
     if (!(destination instanceof AudioDestinationNode)) return null;
