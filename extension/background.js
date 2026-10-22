@@ -74,8 +74,15 @@ async function updateBadge(tabId, url) {
   await chrome.action.setBadgeText({ tabId, text }).catch(() => {});
 }
 
-async function updateAllBadges() {
-  for (const t of await chrome.tabs.query({})) await updateBadge(t.id, t.url);
+let badgeChain = Promise.resolve();
+
+function updateAllBadges() {
+  badgeChain = badgeChain
+    .then(async () => {
+      for (const t of await chrome.tabs.query({})) await updateBadge(t.id, t.url);
+    })
+    .catch(() => {});
+  return badgeChain;
 }
 
 async function setTabLevel(tabId, rawLevel) {
@@ -89,10 +96,10 @@ async function setTabLevel(tabId, rawLevel) {
   return { ok: true };
 }
 
-async function clearTabLevel(tabId) {
+async function clearTabLevel(tabId, { reset = true } = {}) {
   await chrome.storage.session.remove(overrideKey(tabId));
   // Bridges on a saved site ignore this, so it only resets tabs that were following the override.
-  await chrome.tabs.sendMessage(tabId, { type: "tv:setLevel", level: 100 }).catch(() => {});
+  if (reset) await chrome.tabs.sendMessage(tabId, { type: "tv:setLevel", level: 100 }).catch(() => {});
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (tab) await updateBadge(tabId, tab.url);
   return { ok: true };
@@ -109,7 +116,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handlers = {
     "tv:getTabState": () => getTabState(sender.tab),
     "tv:setTabLevel": () => setTabLevel(msg.tabId, msg.level),
-    "tv:clearTabLevel": () => clearTabLevel(msg.tabId),
+    "tv:clearTabLevel": () => clearTabLevel(msg.tabId, { reset: msg.reset !== false }),
   };
   const handler = msg && handlers[msg.type];
   if (!handler) return false;
@@ -127,9 +134,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove(overrideKey(tabId)));
 
+const siteList = (domains) => Object.keys(domains || {}).sort().join("\n");
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.domains) return;
-  syncRegistrations();
+  if (siteList(changes.domains.oldValue) !== siteList(changes.domains.newValue)) syncRegistrations();
   updateAllBadges();
 });
 

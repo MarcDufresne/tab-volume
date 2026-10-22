@@ -138,3 +138,39 @@ test("junk in storage keeps registration working", async () => {
   await page.close();
   await h.setDomains({});
 });
+
+test("level-only change does not touch registrations", async () => {
+  await h.setDomains({ "loud.test": 6 });
+  await h.waitForRegistration(hasSaved("loud.test"));
+  await h.sw.evaluate(() => self.tv.syncRegistrations());
+  await h.sw.evaluate(() => {
+    self.__regCalls = 0;
+    for (const fn of ["registerContentScripts", "updateContentScripts", "unregisterContentScripts"]) {
+      const orig = chrome.scripting[fn].bind(chrome.scripting);
+      chrome.scripting[fn] = (...a) => { self.__regCalls++; return orig(...a); };
+    }
+  });
+  for (const level of [7, 8, 9, 10]) await h.setDomains({ "loud.test": level });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(await h.sw.evaluate(() => self.__regCalls), 0);
+  await h.setDomains({ "loud.test": 10, "x.test": 5 });
+  await h.waitForRegistration((regs) => regs.some((r) => r.id === "tv-page-saved" && r.matches.includes("*://*.x.test/*")));
+  await h.setDomains({});
+});
+
+test("clearing an override without reset sends no level", async () => {
+  await h.setDomains({});
+  await h.waitForRegistration(noSaved);
+  const page = await h.context.newPage();
+  await page.goto(h.serverUrl("other.test") + "/media.html");
+  const tabId = await h.tabIdFor(page);
+  await h.sw.evaluate((id) => self.tv.setTabLevel(id, 30), tabId);
+  await page.evaluate(() => { window.__levels = []; window.addEventListener("tabvolume:level", (e) => window.__levels.push(e.detail)); });
+  await h.sw.evaluate((id) => self.tv.clearTabLevel(id, { reset: false }), tabId);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(await page.evaluate(() => window.__levels), []);
+  await h.sw.evaluate((id) => self.tv.setTabLevel(id, 30), tabId);
+  await h.sw.evaluate((id) => self.tv.clearTabLevel(id), tabId);
+  await eventually(async () => assert.deepEqual(await page.evaluate(() => window.__levels), [100]));
+  await page.close();
+});

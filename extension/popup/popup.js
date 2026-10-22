@@ -82,7 +82,7 @@
     if (on) {
       domains[site] = level;
       await saveDomains(domains);
-      await chrome.runtime.sendMessage({ type: "tv:clearTabLevel", tabId: tab.id });
+      await chrome.runtime.sendMessage({ type: "tv:clearTabLevel", tabId: tab.id, reset: false });
     } else {
       await chrome.runtime.sendMessage({ type: "tv:clearTabLevel", tabId: tab.id });
       delete domains[site];

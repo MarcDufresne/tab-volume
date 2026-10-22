@@ -21,8 +21,22 @@
 
   const isSaved = () => site !== null && levelFor(domains, site) !== null;
 
+  function alive() {
+    try {
+      return Boolean(chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
   function send() {
     if (level !== null) window.dispatchEvent(new CustomEvent("tabvolume:level", { detail: level }));
+  }
+
+  function setLevel(next) {
+    if (next === null || next === level) return;
+    level = next;
+    send();
   }
 
   async function attempt(fn, fallback) {
@@ -34,7 +48,12 @@
   }
 
   async function resolveLevel() {
-    domains = await attempt(async () => (await chrome.storage.local.get("domains")).domains || {}, domains);
+    try {
+      domains = (await chrome.storage.local.get("domains")).domains || {};
+    } catch {
+      // Without the saved levels a saved site can't be told apart; staying silent beats a blast.
+      return;
+    }
     let next = site ? levelFor(domains, site) : null;
     if (next === null) {
       const state = await attempt(() => chrome.runtime.sendMessage({ type: "tv:getTabState" }), null);
@@ -48,23 +67,28 @@
     send();
   }
 
-  window.addEventListener("tabvolume:ready", () => {
+  function onReady() {
+    if (!alive()) {
+      window.removeEventListener("tabvolume:ready", onReady);
+      return;
+    }
     applied = true;
     send();
-  });
+  }
+  window.addEventListener("tabvolume:ready", onReady);
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === "local" && changes.domains) resolveLevel();
+      if (area !== "local" || !changes.domains) return;
+      const wasSaved = isSaved();
+      domains = changes.domains.newValue || {};
+      if (isSaved()) setLevel(levelFor(domains, site));
+      else if (wasSaved || site === null) resolveLevel();
     });
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!msg) return false;
       if (msg.type === "tv:setLevel" && !isSaved()) {
-        const next = clampLevel(msg.level);
-        if (next !== null) {
-          level = next;
-          send();
-        }
+        setLevel(clampLevel(msg.level));
       } else if (msg.type === "tv:ping" && isTop) {
         sendResponse({ site, level, applied });
       }
